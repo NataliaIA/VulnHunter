@@ -40,6 +40,6 @@ class CodeAnalyzer:
         Использует Ollama LLM для дополнительно анализа кода на предмет уязвимых паттернов.
         """
         prompt = build_llama_code_prompt(file_content, vuln_funcs_summary)
-        output = utils.query_ollama(prompt, "llama3")
+        output = utils.query_ollama(prompt, "deepseek-coder:latest")
         return parse_llama_json(output)
 

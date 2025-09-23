@@ -1,7 +1,7 @@
 import json
 import re
 import logging
-import subprocess
+import requests
 
 
 def build_llama_prompt(cve_text, patch_diff=""):
@@ -124,16 +124,9 @@ summary: {vuln_func_info.get('summary')}
 """
     return base
 
-def query_ollama( prompt: str, model_name: str) -> str:
-    process = subprocess.Popen(
-        ["ollama", "run", model_name],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    stdout, stderr = process.communicate(prompt)
-    if process.returncode != 0:
-        print("Ошибка:", stderr)
-        return ""
-    return stdout
+def query_ollama(prompt: str, model_name: str, host: str = "http://127.0.0.1:11434", timeout: int = 300) -> str:
+    url = f"{host}/api/generate"
+    resp = requests.post(url, json={"model": model_name, "prompt": prompt, "stream": False}, timeout=timeout)
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("response", "")
