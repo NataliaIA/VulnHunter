@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Запуск Ollama в фоне
-ollama serve &
+ollama serve &з
 OLLAMA_PID=$!
 
 # Ждём готовности API
