@@ -1,3 +1,6 @@
+from pathlib import Path
+from typing import Optional
+
 from flask import Flask
 from flask_restx import Api, Resource, fields, Namespace
 from cve_parser.parser import CVEParser
@@ -6,6 +9,8 @@ from code_analyzer.dependencies import parse_requirements_txt, find_dependency_f
 from poc_generator.generator import PoCGenerator
 import os
 import uuid
+
+from poc_generator.rag_generator import ContextFileRAG
 
 app = Flask(__name__)
 api = Api(
@@ -44,6 +49,10 @@ find_calls_input = api.model('FindCallsInput', {
 })
 
 generate_poc_input = api.model('GeneratePoCInput', {
+    'pipeline_id': fields.String(required=True, description='ID пайплайна')
+})
+
+get_exploit_input = api.model('GetExploitInput', {
     'pipeline_id': fields.String(required=True, description='ID пайплайна')
 })
 
@@ -174,7 +183,7 @@ class GeneratePoC(Resource):
         pipeline_id = api.payload['pipeline_id']
         p = get_pipeline_or_404(pipeline_id)
         params = p['params']
-        cve_info = p.get('cve_info') or {}
+        cve_info = params.get('cve_text') or {}
 
         poc_gen = PoCGenerator()
         poc = poc_gen.generate_poc(
@@ -208,6 +217,81 @@ class PipelineState(Resource):
             'poc': p['poc']
         }
 
+RAG_INDEX = None  # лениво инициализируем общий индекс на процесс
+
+def _get_rag_index() -> "ContextFileRAG":
+    global RAG_INDEX
+    if RAG_INDEX is None:
+        # Путь к файлу rag.txt рядом с текущим модулем (или поменяйте на нужный)
+        json_txt_path = Path(__file__).resolve().parent / "poc_generator/rag.txt"
+        if not json_txt_path.is_file():
+            raise FileNotFoundError(f"RAG corpus not found: {json_txt_path}")
+        RAG_INDEX = ContextFileRAG.from_json_file(
+            json_txt_path=str(json_txt_path),
+            max_chunk_chars=400,
+            overlap_chars=0,
+            paragraph_mode=True,
+        )
+    return RAG_INDEX
+
+def _build_query_from_context(context: dict) -> Optional[str]:
+    """
+    Формируем запрос к RAG. Сначала пробуем CVE, затем короткое имя/название,
+    затем краткое описание. Если всё пусто — вернём None.
+    """
+    if not context:
+        return None
+    for key in ("CVE-", "name", "short_description", "description"):
+        val = context.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return None
+
+@ns.route('/7-get-exploit')
+class GetExploit(Resource):
+    @ns.expect(get_exploit_input, validate=True)
+    @ns.response(200, 'Эксплойт найден и возвращён')
+    @ns.response(404, 'Эксплойт не найден')
+    def post(self):
+        pipeline_id = api.payload['pipeline_id']
+        p = get_pipeline_or_404(pipeline_id)
+
+        context = p.get('cve_info')  # контекст по CVE (dict с полями cve_id/name/short_description/…)
+        exploit = p.get('poc')       # PoC/эксплойт, если уже был найден ранее
+
+        # Если PoC ещё не сгенерирован предыдущим шагом — пытаемся извлечь его из локального RAG
+        if not exploit:
+            # Строим запрос для RAG
+            #query = _build_query_from_context(context) or api.payload.get('query') or ""
+            query = p.get('params').get('cve_text')
+            if not query:
+                api.abort(404, f"Exploit for pipeline {pipeline_id} not found and query is empty.")
+
+            rag = _get_rag_index()
+            # generate_answer уже возвращает только кусок после маркера "Пример эксплуатации (без вредоносной нагрузки):"
+            result = rag.generate_answer(
+                question=query,
+                top_k=1,
+                max_context_chars=10000,
+                return_debug=True,
+            )
+            exploit = (result.get("answer") or "").strip()
+            if not exploit:
+                api.abort(404, f"Exploit for pipeline {pipeline_id} not found in local RAG for query: {query}")
+
+            # Сохраняем PoC и debug в pipeline для повторного использования
+            p['poc'] = exploit
+            p['rag_debug'] = result.get("debug", "")
+
+        # Обновляем статус для наглядности
+        p['status'] = 'exploit_returned'
+
+        return {
+            'pipeline_id': pipeline_id,
+            'context': context,   # контекст, связанный с уязвимостью
+            'exploit': exploit,   # соответствующий эксплойт из локального RAG/хранилища
+            'done': True
+        }
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True)

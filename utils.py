@@ -39,6 +39,33 @@ def parse_llama_json(llama_output: str):
         except json.JSONDecodeError:
             pass
     return {}
+import re
+
+def extract_python_code(text: str) -> str:
+    """
+    Возвращает конкатенацию всех блоков кода Python из текста.
+    1) Ищет блоки в формате
+python ...
+(или
+py ...
+), без учёта регистра.
+    2) Если не нашлось, ищет любые
+ ...
+и выбирает те, что похожи на Python.
+    """
+    # Основной случай: явные python/py-фенсы
+    py_fenced = re.compile(r"```(?:python|py)\s*\r?\n(.*?)\r?\n?```", re.IGNORECASE | re.DOTALL)
+    blocks = [b.strip() for b in py_fenced.findall(text)]
+    if blocks:
+        return "\n\n".join(blocks)
+
+    # Фолбэк: любые тройные кавычки с Python-подобным содержимым
+    any_fenced = re.compile(r"```\s*\r?\n(.*?)\r?\n?```", re.DOTALL)
+    candidates = [c.strip() for c in any_fenced.findall(text)]
+    py_like_heur = re.compile(r"\b(def|import|from|class|print\s*\(|async|await|with\s+|except|try|lambda)\b")
+    py_like = [c for c in candidates if py_like_heur.search(c)]
+
+    return "\n\n".join(py_like)
 
 def parse_llama_json(llama_output: str):
     """
@@ -121,6 +148,18 @@ summary: {vuln_func_info.get('summary')}
 - poc_code: строка с демонстрационным кодом
 - usage_comment: кратко опиши принципы появления и безопасного тестирования условия
 
+"""
+    return base
+
+def build_deepseek_poc_prompt(cve_info, exploit_type, language):
+    """
+    Формирует промпт для Llama по генерации PoC-демонстрации (тест-кейса) для потенциальной уязвимости.
+    """
+    base = f"""
+Make PoC example for:
+{cve_info}
+exploit_type: {exploit_type}
+language: {language}
 """
     return base
 

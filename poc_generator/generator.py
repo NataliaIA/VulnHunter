@@ -8,7 +8,7 @@ class PoCGenerator:
     def __init__(self, llama_model="deepseek-coder:latest"):
         self.llama_model = llama_model
 
-    def generate_poc(self, vuln_func_info, exploit_type="RCE", language="python"):
+    def generate_poc(self, cve_info, exploit_type="RCE", language="python"):
         """
         Генерирует PoC-эксплойт при помощи Ollama LLM.
         vuln_func_info: dict с полями function, file, summary и т.д.
@@ -16,8 +16,8 @@ class PoCGenerator:
         language: язык целевого PoC
         Возвращает dict с PoC-кодом и кратким описанием.
         """
-        prompt = build_llama_poc_prompt(vuln_func_info, exploit_type, language)
+        prompt = utils.build_deepseek_poc_prompt(cve_info, exploit_type, language)
         response = utils.query_ollama(prompt, "deepseek-coder:latest")
         print(f"Poc model output: {response}")
-        return parse_llama_json(response)
+        return utils.extract_python_code(response)
 

