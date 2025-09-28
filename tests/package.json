@@ -1,0 +1,16 @@
+{
+  "name": "sample-project",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Пример проекта с зависимостями для детектора",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "lodash": "^4.17.21",
+    "axios": "^1.7.4"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "eslint": "^9.9.0"
+  }
+}
